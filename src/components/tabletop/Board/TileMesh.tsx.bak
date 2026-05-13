@@ -1,0 +1,487 @@
+/**
+ * BUSINESS TOUR — PREMIUM EDITION
+ * TileMesh v3 — Visually upgraded for reference image fidelity
+ *
+ * Key changes from v2:
+ *  - Accent bands are 3× taller and fully emissive — clearly visible
+ *  - Inner border frame lines glow (like reference image light strips)
+ *  - Tile body is slightly lighter so text is readable without hover
+ *  - Hologram landmarks are 2× larger and always visible at 30% opacity
+ *  - Per-tile point light for corner/special tiles
+ *  - Gold inner-border inset lines on every city tile
+ */
+
+'use client';
+
+import React, { useRef, useState, useCallback, useMemo } from 'react';
+import { RoundedBox, Text } from '@react-three/drei';
+import { useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
+import { boardConfig } from '@/data/boardConfig';
+import { colors }      from '@/data/colors';
+import {
+  makeAccentMat,
+  makeOwnerMat,
+  makeHologramMat,
+  makeHologramWireMat,
+  makeRingMat,
+  tileInsetMat,
+  cornerBaseMat,
+  specialBaseMat,
+  premiumBaseMat,
+  tileBaseMat,
+} from '@/utils/materials';
+import { TileData, TileSide } from '@/data/tiles';
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+interface TileMeshProps {
+  position: [number, number, number];
+  tile: TileData;
+}
+
+// ─── Orientation helpers ──────────────────────────────────────────────────────
+
+const TEXT_ROT: Record<TileSide, [number, number, number]> = {
+  bottom: [-Math.PI / 2, 0, 0],
+  top:    [-Math.PI / 2, 0, 0],
+  left:   [-Math.PI / 2, 0,  Math.PI / 2],
+  right:  [-Math.PI / 2, 0,  Math.PI / 2],
+};
+
+function outerSign(side: TileSide): number {
+  return side === 'bottom' || side === 'right' ? 1 : -1;
+}
+
+function getAccentBand(side: TileSide, tileSize: number) {
+  const offset = tileSize * 0.38;   // closer to outer edge
+  const long   = tileSize * 0.88;
+  const short  = boardConfig.tiles.accentDepth;
+  const h      = 0.038;             // 3× taller than before — clearly visible
+  const y      = 0.016;
+
+  if (side === 'bottom') return { args: [long, h, short] as [n,n,n], pos: [0, y,  offset] as [n,n,n] };
+  if (side === 'top')    return { args: [long, h, short] as [n,n,n], pos: [0, y, -offset] as [n,n,n] };
+  if (side === 'left')   return { args: [short, h, long] as [n,n,n], pos: [-offset, y, 0] as [n,n,n] };
+  return                        { args: [short, h, long] as [n,n,n], pos: [ offset, y, 0] as [n,n,n] };
+}
+type n = number;
+
+function getOwnerBand(side: TileSide, tileSize: number) {
+  const offset = tileSize * 0.26;
+  const long   = tileSize * 0.80;
+  const short  = boardConfig.tiles.ownershipDepth;
+  const h      = 0.008;
+  const y      = 0.026;
+
+  if (side === 'bottom') return { args: [long, h, short] as [n,n,n], pos: [0, y, -offset] as [n,n,n] };
+  if (side === 'top')    return { args: [long, h, short] as [n,n,n], pos: [0, y,  offset] as [n,n,n] };
+  if (side === 'left')   return { args: [short, h, long] as [n,n,n], pos: [ offset, y, 0] as [n,n,n] };
+  return                        { args: [short, h, long] as [n,n,n], pos: [-offset, y, 0] as [n,n,n] };
+}
+
+function getLabelPos(side: TileSide, tileSize: number, isCorner: boolean): [number, number, number] {
+  const y     = boardConfig.tiles.height / 2 + 0.062;
+  const inset = isCorner ? tileSize * 0.04 : 0;
+  if (side === 'bottom' || side === 'top') return [0, y, -inset];
+  return [-inset, y, 0];
+}
+
+function getSubtitlePos(side: TileSide, tileSize: number, isCorner: boolean): [number, number, number] {
+  const d = isCorner ? tileSize * 0.30 : tileSize * 0.25;
+  const y = boardConfig.tiles.height / 2 + 0.060;
+  if (side === 'bottom' || side === 'top') return [0, y, -d];
+  return [-d, y, 0];
+}
+
+function getLandmarkPos(side: TileSide, tileSize: number): [number, number, number] {
+  // Outer third of tile — where landmark lives
+  const d = tileSize * 0.16;
+  const y = boardConfig.tiles.height / 2 + 0.022;
+  if (side === 'bottom' || side === 'top') return [0, y, outerSign(side) * d];
+  return [outerSign(side) * d, y, 0];
+}
+
+function getLabelSize(label: string, isCorner: boolean) {
+  if (isCorner) return label.length > 8 ? 0.13 : 0.15;
+  if (label.length > 8) return 0.115;
+  return 0.130;
+}
+
+// ─── Tile base material ───────────────────────────────────────────────────────
+
+function getTileBodyMat(tile: TileData): THREE.MeshStandardMaterial {
+  if (tile.isCorner)                                   return cornerBaseMat;
+  if (tile.kind === 'chance' || tile.kind === 'tax')   return specialBaseMat;
+  if (tile.isPremium)                                  return premiumBaseMat;
+  return tileBaseMat;
+}
+
+// ─── Inner border glow lines ──────────────────────────────────────────────────
+// Replicates the thin emissive inset border lines seen in the reference image
+
+function InnerBorderLines({
+  tileSize,
+  color,
+  side,
+  h,
+}: {
+  tileSize: number;
+  color: number;
+  side: TileSide;
+  h: number;
+}) {
+  const mat = useMemo(() => new THREE.MeshStandardMaterial({
+    color: new THREE.Color(color),
+    emissive: new THREE.Color(color),
+    emissiveIntensity: 0.55,
+    metalness: 0.0,
+    roughness: 1.0,
+    transparent: true,
+    opacity: 0.8,
+  }), [color]);
+
+  const inset = tileSize * 0.072;
+  const y     = h / 2 + 0.008;
+  const len   = tileSize - inset * 2;
+  const sw    = 0.007;
+
+  // Four border lines
+  return (
+    <group>
+      <mesh material={mat} position={[0, y,  tileSize / 2 - inset]}><boxGeometry args={[len, 0.004, sw]} /></mesh>
+      <mesh material={mat} position={[0, y, -tileSize / 2 + inset]}><boxGeometry args={[len, 0.004, sw]} /></mesh>
+      <mesh material={mat} position={[ tileSize / 2 - inset, y, 0]}><boxGeometry args={[sw, 0.004, len]} /></mesh>
+      <mesh material={mat} position={[-tileSize / 2 + inset, y, 0]}><boxGeometry args={[sw, 0.004, len]} /></mesh>
+    </group>
+  );
+}
+
+// ─── Corner diamond ornaments ─────────────────────────────────────────────────
+
+function CornerDiamonds({ tileSize, color, h }: { tileSize: number; color: number; h: number }) {
+  const mat = useMemo(() => new THREE.MeshStandardMaterial({
+    color: new THREE.Color(color),
+    emissive: new THREE.Color(color),
+    emissiveIntensity: 0.7,
+    metalness: 0.8,
+    roughness: 0.15,
+  }), [color]);
+
+  const inset = tileSize * 0.072;
+  const y = h / 2 + 0.010;
+  const s = 0.022;
+  return (
+    <group>
+      {[[-1,-1],[1,-1],[-1,1],[1,1]].map(([sx,sz],i) => (
+        <mesh key={i} material={mat} position={[sx*(tileSize/2-inset), y, sz*(tileSize/2-inset)]} rotation={[0, Math.PI/4, 0]}>
+          <boxGeometry args={[s, 0.004, s]} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+// ─── Landmark geometry (always-on, larger than before) ───────────────────────
+
+function PermanentLandmark({ tile, tileSize }: { tile: TileData; tileSize: number }) {
+  const landmarkPos = getLandmarkPos(tile.side, tileSize);
+  const color = tile.accentColor;
+
+  const mat = useMemo(() => new THREE.MeshStandardMaterial({
+    color: new THREE.Color(color),
+    emissive: new THREE.Color(color),
+    emissiveIntensity: 0.5,
+    metalness: 0.6,
+    roughness: 0.3,
+    transparent: true,
+    opacity: 0.75,
+  }), [color]);
+
+  const wireMat = useMemo(() => new THREE.MeshBasicMaterial({
+    color: new THREE.Color(color),
+    wireframe: true,
+    transparent: true,
+    opacity: 0.18,
+  }), [color]);
+
+  const id = tile.id;
+  const s = 1.35; // global scale multiplier vs v2
+
+  // Tower/spire cities
+  if (['paris', 'new-york', 'seattle', 'shanghai'].includes(id)) return (
+    <group position={landmarkPos} scale={[s,s,s]}>
+      <mesh material={mat} position={[0, 0.12, 0]}><cylinderGeometry args={[0.007, 0.042, 0.24, 6]} /></mesh>
+      <mesh material={mat} position={[0, 0.06, 0]}><cylinderGeometry args={[0.058, 0.058, 0.012, 8]} /></mesh>
+      <mesh material={mat} position={[0, 0.015, 0]}><cylinderGeometry args={[0.080, 0.080, 0.016, 8]} /></mesh>
+      <mesh material={wireMat} position={[0, 0.12, 0]}><cylinderGeometry args={[0.008, 0.044, 0.25, 6]} /></mesh>
+    </group>
+  );
+
+  // Arch / dome cities
+  if (['rome', 'sydney', 'london', 'moscow'].includes(id)) return (
+    <group position={landmarkPos} scale={[s,s,s]}>
+      <mesh material={mat} rotation={[Math.PI/2, 0, 0]} position={[0, 0.10, 0]}><torusGeometry args={[0.078, 0.016, 8, 24, Math.PI]} /></mesh>
+      <mesh material={mat} position={[-0.078, 0.042, 0]}><cylinderGeometry args={[0.013, 0.013, 0.10, 6]} /></mesh>
+      <mesh material={mat} position={[ 0.078, 0.042, 0]}><cylinderGeometry args={[0.013, 0.013, 0.10, 6]} /></mesh>
+      <mesh material={mat} position={[0, 0.003, 0]}><boxGeometry args={[0.20, 0.009, 0.06]} /></mesh>
+    </group>
+  );
+
+  // Skyline cities
+  if (['hong-kong', 'beijing', 'berlin', 'hamburg'].includes(id)) {
+    const heights = [0.16, 0.22, 0.28, 0.20, 0.14];
+    const xPos    = [-0.090,-0.044, 0, 0.044, 0.090];
+    return (
+      <group position={landmarkPos} scale={[s,s,s]}>
+        {heights.map((h,i) => (
+          <mesh key={i} material={mat} position={[xPos[i], h/2, 0]}><boxGeometry args={[0.032, h, 0.032]} /></mesh>
+        ))}
+        {heights.map((h,i) => (
+          <mesh key={`w${i}`} material={wireMat} position={[xPos[i], h/2, 0]}><boxGeometry args={[0.034, h+0.002, 0.034]} /></mesh>
+        ))}
+      </group>
+    );
+  }
+
+  // Water / island cities
+  if (['maldives', 'venice', 'sochi', 'nice', 'cyprus'].includes(id)) return (
+    <group position={landmarkPos} scale={[s,s,s]}>
+      <mesh material={mat} position={[0, 0.006, 0]}><cylinderGeometry args={[0.115, 0.115, 0.009, 32]} /></mesh>
+      <mesh material={mat} position={[0, 0.018, 0]}><cylinderGeometry args={[0.048, 0.048, 0.016, 12]} /></mesh>
+      <mesh material={wireMat} position={[0, 0.005, 0]} rotation={[Math.PI/2, 0, 0]}><torusGeometry args={[0.095, 0.005, 6, 32]} /></mesh>
+    </group>
+  );
+
+  // Diamond gem cities
+  if (['milan', 'madrid', 'granada', 'lyon'].includes(id)) return (
+    <group position={landmarkPos} scale={[s,s,s]}>
+      <mesh material={mat} position={[0, 0.10, 0]}><octahedronGeometry args={[0.08, 0]} /></mesh>
+      <mesh material={wireMat} position={[0, 0.10, 0]}><octahedronGeometry args={[0.082, 0]} /></mesh>
+      <mesh material={mat} position={[0, 0.008, 0]} rotation={[Math.PI/2, 0, 0]}><torusGeometry args={[0.058, 0.009, 6, 24]} /></mesh>
+    </group>
+  );
+
+  // Chance — icosahedron crystal
+  if (tile.kind === 'chance') return (
+    <group position={landmarkPos} scale={[s,s,s]}>
+      <mesh material={mat} position={[0, 0.10, 0]}><icosahedronGeometry args={[0.09, 0]} /></mesh>
+      <mesh material={wireMat} position={[0, 0.10, 0]}><icosahedronGeometry args={[0.093, 0]} /></mesh>
+    </group>
+  );
+
+  // Tax — pyramid
+  if (tile.kind === 'tax') return (
+    <group position={landmarkPos} scale={[s,s,s]}>
+      <mesh material={mat} position={[0, 0.09, 0]}><coneGeometry args={[0.08, 0.18, 4]} /></mesh>
+      <mesh material={wireMat} position={[0, 0.09, 0]}><coneGeometry args={[0.082, 0.185, 4]} /></mesh>
+    </group>
+  );
+
+  // Corner — obelisk
+  if (tile.isCorner) return (
+    <group position={[0, boardConfig.tiles.height/2 + 0.02, 0]} scale={[s,s,s]}>
+      <mesh material={mat} position={[0, 0.13, 0]}><cylinderGeometry args={[0.011, 0.055, 0.26, 4]} /></mesh>
+      <mesh material={mat} position={[0, 0.008, 0]}><boxGeometry args={[0.12, 0.012, 0.12]} /></mesh>
+    </group>
+  );
+
+  // Fallback
+  return (
+    <group position={landmarkPos} scale={[s,s,s]}>
+      <mesh material={mat} position={[0, 0.09, 0]}><octahedronGeometry args={[0.072, 0]} /></mesh>
+    </group>
+  );
+}
+
+// ─── Hover Hologram ───────────────────────────────────────────────────────────
+
+function HoverHologram({ tile, hovered }: { tile: TileData; hovered: boolean }) {
+  const progressRef = useRef(0);
+  const [progress, setProgress] = useState(0);
+  const tileH = boardConfig.tiles.height;
+
+  // Determine color BEFORE hooks so deps are stable
+  const holColor = tile.kind === 'chance' ? colors.board.hologramChance
+    : tile.kind === 'tax' ? colors.board.hologramTax
+    : colors.board.hologramBase;
+
+  // ── ALL hooks must be called unconditionally (Rules of Hooks) ──────────────
+  const mat     = useMemo(() => makeHologramMat(holColor,           0.8), [holColor]);
+  const wireMat = useMemo(() => makeHologramWireMat(holColor,       0.3), [holColor]);
+  const ringMat = useMemo(() => makeRingMat(holColor),                    [holColor]);
+
+  useFrame((_, delta) => {
+    const target = hovered ? 1 : 0;
+    progressRef.current = THREE.MathUtils.lerp(progressRef.current, target, 1 - Math.exp(-2.5 * delta));
+    if (Math.abs(progressRef.current - progress) > 0.005) setProgress(progressRef.current);
+  });
+  // ── End unconditional hooks ────────────────────────────────────────────────
+
+  // Mutate opacity each frame based on progress (safe — not a hook)
+  mat.opacity     = progress * 0.88;
+  wireMat.opacity = progress * 0.40;
+  ringMat.opacity = progress * 0.50;
+
+  // Early exit AFTER all hooks
+  if (progress < 0.02) return null;
+
+  const holY  = tileH / 2 + 0.04 + progress * 0.55;
+  const scale = 0.5 + progress * 0.5;
+
+  return (
+    <>
+      {/* Projection ring */}
+      <group position={[0, tileH / 2 + 0.006, 0]}>
+        <mesh material={ringMat} rotation={[Math.PI / 2, 0, 0]} scale={[scale, scale, scale]}>
+          <torusGeometry args={[0.25, 0.010, 6, 48]} />
+        </mesh>
+      </group>
+
+      {/* Rising hologram form */}
+      <group position={[0, holY, 0]} scale={[scale, scale, scale]}>
+        <mesh material={mat}     position={[0, 0.14, 0]}><cylinderGeometry args={[0.008, 0.05,  0.28, 6]} /></mesh>
+        <mesh material={mat}     position={[0, 0.07, 0]}><cylinderGeometry args={[0.07,  0.07,  0.013, 8]} /></mesh>
+        <mesh material={wireMat} position={[0, 0.14, 0]}><cylinderGeometry args={[0.009, 0.052, 0.29, 6]} /></mesh>
+      </group>
+    </>
+  );
+}
+
+// ─── TileMesh — Main ─────────────────────────────────────────────────────────
+
+export function TileMesh({ position, tile }: TileMeshProps) {
+  const { width }     = boardConfig.dimensions;
+  const { thickness } = boardConfig.frame;
+  const cellCount     = boardConfig.grid.lineCount;
+  const cellSize      = (width - thickness * 2) / cellCount;
+  const { height, margin, topInset, chamfer, chamferSmooth } = boardConfig.tiles;
+
+  const tileSize  = cellSize - margin;
+  const insetSize = tileSize - topInset;
+
+  const accent     = getAccentBand(tile.side, tileSize);
+  const owner      = getOwnerBand(tile.side, tileSize);
+  const ownerColor = tile.ownerColor ?? colors.board.ownershipEmpty;
+
+  const accentMat = useMemo(() => makeAccentMat(tile.accentColor, tile.isPremium), [tile.accentColor, tile.isPremium]);
+  const ownerMat  = useMemo(() => makeOwnerMat(ownerColor, !!tile.ownerColor),     [ownerColor, tile.ownerColor]);
+  const bodyMat   = getTileBodyMat(tile);
+
+  const [hovered, setHovered] = useState(false);
+  const onPointerEnter = useCallback(() => setHovered(true),  []);
+  const onPointerLeave = useCallback(() => setHovered(false), []);
+
+  const isSpecial = tile.kind === 'chance' || tile.kind === 'tax';
+  const label     = tile.label.replaceAll(' ', '\n');
+  const rotation  = TEXT_ROT[tile.side];
+  const labelPos  = getLabelPos(tile.side, tileSize, tile.isCorner);
+  const subPos    = getSubtitlePos(tile.side, tileSize, tile.isCorner);
+
+  // Inset color
+  const insetColor = tile.isCorner ? colors.board.tileCorner
+    : isSpecial    ? colors.board.tileSpecial
+    : tile.isPremium ? colors.board.tilePremium
+    :                  colors.board.tileInset;
+
+  const labelColor = hovered ? 0xffffff : colors.board.tileText;
+
+  // Accent color for border lines
+  const borderColor = tile.isCorner   ? (tile.accentColor ?? colors.board.frame)
+    : isSpecial     ? tile.accentColor
+    : tile.accentColor;
+
+  return (
+    <group position={position} onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave}>
+
+      {/* ── 1. Tile Body ───────────────────────────────────────────── */}
+      <RoundedBox
+        args={[tileSize, height, tileSize]}
+        radius={chamfer}
+        smoothness={chamferSmooth}
+        castShadow receiveShadow
+        material={bodyMat}
+      />
+
+      {/* ── 2. Inset Panel ─────────────────────────────────────────── */}
+      <mesh position={[0, height / 2 + 0.003, 0]} receiveShadow>
+        <boxGeometry args={[insetSize, 0.007, insetSize]} />
+        <meshStandardMaterial color={new THREE.Color(insetColor)} roughness={0.50} metalness={0.12} envMapIntensity={0.4} />
+      </mesh>
+
+      {/* ── 3. Accent Band — category color strip (TALL + EMISSIVE) ─ */}
+      <mesh position={accent.pos} material={accentMat} castShadow>
+        <boxGeometry args={accent.args} />
+      </mesh>
+
+      {/* ── 4. Ownership Ring ──────────────────────────────────────── */}
+      <mesh position={owner.pos} material={ownerMat}>
+        <boxGeometry args={owner.args} />
+      </mesh>
+
+      {/* ── 5. Inner border glow lines ─────────────────────────────── */}
+      <InnerBorderLines tileSize={tileSize} color={borderColor} side={tile.side} h={height} />
+
+      {/* ── 5b. Corner diamond ornaments ───────────────────────────── */}
+      <CornerDiamonds tileSize={tileSize} color={borderColor} h={height} />
+
+      {/* ── 6. Permanent landmark geometry ─────────────────────────── */}
+      {!tile.isCorner && (
+        <PermanentLandmark tile={tile} tileSize={tileSize} />
+      )}
+
+      {/* ── 7a. City name label ─────────────────────────────────────── */}
+      <Text
+        position={labelPos}
+        rotation={rotation}
+        fontSize={getLabelSize(tile.label, tile.isCorner)}
+        color={new THREE.Color(labelColor)}
+        anchorX="center"
+        anchorY="middle"
+        maxWidth={tileSize * 0.84}
+        textAlign="center"
+        lineHeight={0.88}
+        outlineColor={0x060402}
+        outlineWidth={0.008}
+        material-side={THREE.DoubleSide}
+        material-toneMapped={false}
+      >
+        {label}
+      </Text>
+
+      {/* ── 7b. Subtitle ───────────────────────────────────────────── */}
+      {tile.subtitle && (
+        <Text
+          position={subPos}
+          rotation={rotation}
+          fontSize={0.062}
+          color={hovered ? new THREE.Color(colors.board.tileAccentText) : new THREE.Color(colors.board.tileMutedText)}
+          anchorX="center"
+          anchorY="middle"
+          maxWidth={tileSize * 0.68}
+          textAlign="center"
+          outlineColor={0x060402}
+          outlineWidth={0.005}
+          material-side={THREE.DoubleSide}
+          material-toneMapped={false}
+        >
+          {tile.subtitle.toUpperCase()}
+        </Text>
+      )}
+
+      {/* ── 8. Per-tile accent point light (corners + special only) ── */}
+      {(tile.isCorner || isSpecial) && (
+        <pointLight
+          color={new THREE.Color(tile.accentColor)}
+          intensity={0.8}
+          distance={1.6}
+          decay={2}
+          position={[0, 0.6, 0]}
+        />
+      )}
+
+      {/* ── 9. Hover hologram ──────────────────────────────────────── */}
+      <HoverHologram tile={tile} hovered={hovered} />
+    </group>
+  );
+}
