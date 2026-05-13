@@ -1,176 +1,80 @@
-/**
- * BUSINESS TOUR — PREMIUM EDITION
- * BoardCenterpiece v2 — The Board's Emblem Heart
- *
- * Construction:
- *   The centerpiece is the board's soul — a layered emblem system:
- *   - Deep forest base disc (the playing field interior)
- *   - Slowly rotating outer gold ring — the main emblem ring
- *   - Slowly counter-rotating inner emerald ring
- *   - Mid ring — dim brass accent
- *   - Four architectural cross-bar inlays in burnished brass
- *   - BUSINESS TOUR wordmark in warm parchment
- *   - WORLD CAPITALS subtitle in dim amber
- *
- *   All rings rotate at different speeds for a layered mechanical feeling.
- */
-
-'use client';
-
 import React, { useRef } from 'react';
 import { Text } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
-import * as THREE from 'three';
 import { Group } from 'three';
 import { boardConfig } from '@/data/boardConfig';
 import { colors } from '@/data/colors';
 import { goldMat } from '@/utils/materials';
 
-const emeraldRingMat = new THREE.MeshStandardMaterial({
-  color: colors.board.premium,
-  roughness: 0.20,
-  metalness: 0.68,
-  emissive: colors.board.premium,
-  emissiveIntensity: 0.05,
-  envMapIntensity: 0.8,
-});
-
-const midRingMat = new THREE.MeshStandardMaterial({
-  color: 0x4a3810,
-  roughness: 0.35,
-  metalness: 0.72,
-  envMapIntensity: 0.7,
-});
-
-const crossBarMat = new THREE.MeshStandardMaterial({
-  color: 0x5c4416,
-  roughness: 0.28,
-  metalness: 0.76,
-  envMapIntensity: 0.9,
-});
-
 export function BoardCenterpiece() {
-  const { height: boardH } = boardConfig.dimensions;
-  const cfg = boardConfig.centerEmblem;
-
-  const outerRingRef  = useRef<Group>(null);
-  const innerRingRef  = useRef<Group>(null);
-
-  const y = boardH / 2 + cfg.thickness / 2 + 0.008;
+  const { height: boardHeight } = boardConfig.dimensions;
+  const { radius, thickness, innerRingRadius, innerRingThickness } = boardConfig.centerEmblem;
+  const ringRef = useRef<Group>(null);
+  const y = boardHeight / 2 + thickness / 2 + 0.01;
 
   useFrame((state) => {
-    const t = state.clock.getElapsedTime();
-    if (outerRingRef.current) {
-      outerRingRef.current.rotation.y = t * 0.045;    // Slow drift clockwise
-    }
-    if (innerRingRef.current) {
-      innerRingRef.current.rotation.y = -t * 0.028;   // Counter-rotate, slower
+    if (ringRef.current) {
+      ringRef.current.rotation.y = state.clock.getElapsedTime() * 0.05;
     }
   });
 
   return (
-    <group>
-      {/* ── Base disc — deep forest playing field ───────────────────────── */}
+    <group position={[0, 0, 0]}>
       <mesh position={[0, y, 0]} receiveShadow>
-        <cylinderGeometry args={[cfg.radius, cfg.radius, cfg.thickness, 80]} />
-        <meshStandardMaterial
-          color={0x0c1c12}
-          roughness={0.50}
-          metalness={0.14}
-          envMapIntensity={0.45}
-        />
+        <cylinderGeometry args={[radius, radius, thickness, 72]} />
+        <meshStandardMaterial color={0x172216} roughness={0.34} metalness={0.22} envMapIntensity={0.7} />
       </mesh>
 
-      {/* ── Outer gold ring — slow clockwise rotation ───────────────────── */}
-      <group ref={outerRingRef} position={[0, boardH / 2 + 0.038, 0]}>
+      <group ref={ringRef} position={[0, boardHeight / 2 + 0.04, 0]}>
         <mesh rotation={[Math.PI / 2, 0, 0]} material={goldMat}>
-          <torusGeometry args={[cfg.innerRingRadius, cfg.innerRingThickness, 10, 80]} />
+          <torusGeometry args={[innerRingRadius, innerRingThickness, 8, 72]} />
+        </mesh>
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[innerRingRadius * 0.63, innerRingThickness * 0.55, 8, 72]} />
+          <meshStandardMaterial color={colors.board.premium} roughness={0.18} metalness={0.7} emissive={colors.board.premium} emissiveIntensity={0.03} />
         </mesh>
       </group>
 
-      {/* ── Mid ring — static burnished brass ───────────────────────────── */}
-      <mesh
-        position={[0, boardH / 2 + 0.034, 0]}
-        rotation={[Math.PI / 2, 0, 0]}
-        material={midRingMat}
-      >
-        <torusGeometry args={[cfg.midRingRadius, cfg.midRingThickness, 8, 60]} />
-      </mesh>
-
-      {/* ── Inner emerald ring — slow counter-rotation ──────────────────── */}
-      <group ref={innerRingRef} position={[0, boardH / 2 + 0.032, 0]}>
-        <mesh rotation={[Math.PI / 2, 0, 0]} material={emeraldRingMat}>
-          <torusGeometry args={[cfg.midRingRadius * 0.58, cfg.midRingThickness * 0.7, 8, 60]} />
-        </mesh>
-      </group>
-
-      {/* ── Cross-bar inlays ─────────────────────────────────────────────── */}
       {[
-        { x: 0,                     z: -cfg.crossBarLength / 2 * 0.60, w: cfg.crossBarWidth, d: cfg.crossBarLength * 0.60 },
-        { x: 0,                     z:  cfg.crossBarLength / 2 * 0.60, w: cfg.crossBarWidth, d: cfg.crossBarLength * 0.60 },
-        { x: -cfg.crossBarLength / 2 * 0.60, z: 0, w: cfg.crossBarLength * 0.60, d: cfg.crossBarWidth },
-        { x:  cfg.crossBarLength / 2 * 0.60, z: 0, w: cfg.crossBarLength * 0.60, d: cfg.crossBarWidth },
-      ].map((bar, idx) => (
-        <mesh
-          key={`crossbar-${idx}`}
-          position={[bar.x, boardH / 2 + 0.030, bar.z]}
-          material={crossBarMat}
-        >
-          <boxGeometry args={[bar.w, 0.010, bar.d]} />
+        { x: 0, z: -0.74, w: 1.16, d: 0.035 },
+        { x: 0, z: 0.74, w: 1.16, d: 0.035 },
+        { x: -0.74, z: 0, w: 0.035, d: 1.16 },
+        { x: 0.74, z: 0, w: 0.035, d: 1.16 },
+      ].map((bar, index) => (
+        <mesh key={`center-inlay-${index}`} position={[bar.x, boardHeight / 2 + 0.035, bar.z]}>
+          <boxGeometry args={[bar.w, 0.012, bar.d]} />
+          <meshStandardMaterial color={0x5f4923} roughness={0.25} metalness={0.72} envMapIntensity={0.9} />
         </mesh>
       ))}
 
-      {/* ── Wordmark — BUSINESS TOUR ─────────────────────────────────────── */}
       <Text
-        position={[0, boardH / 2 + 0.068, -0.055]}
+        position={[0, boardHeight / 2 + 0.072, -0.06]}
         rotation={[-Math.PI / 2, 0, 0]}
-        fontSize={0.218}
+        fontSize={0.24}
         color={colors.board.tileText}
         anchorX="center"
         anchorY="middle"
-        maxWidth={1.85}
+        maxWidth={1.9}
         textAlign="center"
-        outlineColor={0x040302}
-        outlineWidth={0.009}
-        material-toneMapped={false}
-        letterSpacing={0.04}
+        outlineColor={0x060403}
+        outlineWidth={0.01}
       >
         BUSINESS TOUR
       </Text>
 
-      {/* ── Subtitle — WORLD CAPITALS ────────────────────────────────────── */}
       <Text
-        position={[0, boardH / 2 + 0.070, 0.22]}
+        position={[0, boardHeight / 2 + 0.074, 0.25]}
         rotation={[-Math.PI / 2, 0, 0]}
-        fontSize={0.064}
+        fontSize={0.072}
         color={colors.board.tileMutedText}
         anchorX="center"
         anchorY="middle"
-        maxWidth={1.50}
+        maxWidth={1.55}
         textAlign="center"
-        outlineColor={0x040302}
+        outlineColor={0x060403}
         outlineWidth={0.004}
-        material-toneMapped={false}
-        letterSpacing={0.12}
       >
         WORLD CAPITALS
-      </Text>
-
-      {/* ── Premium Edition badge ─────────────────────────────────────────── */}
-      <Text
-        position={[0, boardH / 2 + 0.068, 0.44]}
-        rotation={[-Math.PI / 2, 0, 0]}
-        fontSize={0.042}
-        color={colors.board.emblem}
-        anchorX="center"
-        anchorY="middle"
-        textAlign="center"
-        outlineColor={0x040302}
-        outlineWidth={0.003}
-        material-toneMapped={false}
-        letterSpacing={0.18}
-      >
-        PREMIUM EDITION
       </Text>
     </group>
   );

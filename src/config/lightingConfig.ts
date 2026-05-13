@@ -1,48 +1,42 @@
 export const lightingConfig = {
   keyLight: {
-    position: [-6, 16, 8] as [number, number, number],
-    color: '#fff8e8',
-    intensity: 4.5,   // was ~2 — needs to be much stronger for tile shine
+    position: [-4, 12, 6] as [number, number, number],
+    color: 0xffd280,
+    intensity: 2.8,
   },
   fillLight: {
-    position: [10, 10, -6] as [number, number, number],
-    color: '#ffe8cc',
-    intensity: 1.8,
+    position: [8, 6, -3] as [number, number, number],
+    color: 0xffe8b0,
+    intensity: 0.6,
   },
   rimLight: {
-    position: [0, 8, -14] as [number, number, number],
-    color: '#c8d8ff',
-    intensity: 1.2,
-  },
-  // Extra front fill — prevents tiles facing camera from being dark
-  frontFill: {
-    position: [0, 6, 12] as [number, number, number],
-    color: '#fff4e0',
-    intensity: 1.4,
+    position: [-5, 3, -10] as [number, number, number],
+    color: 0x8ab4d8,
+    intensity: 0.35,
   },
   ambient: {
-    color: '#2a1e10',
-    intensity: 0.9,   // was 0.35 — tiles need ambient to not look black
+    color: 0x3d2a14,
+    intensity: 1.1,
   },
   hemisphere: {
-    skyColor:    '#3a2810' as any,
-    groundColor: '#0a0806' as any,
-    intensity: 0.8,
+    skyColor: 0x2d1f0d,
+    groundColor: 0x0a0806,
+    intensity: 0.5,
   },
   boardGlow: {
-    position:      [0, 5, 0] as [number, number, number],
-    color:         '#ffd080',
-    baseIntensity: 2.0,
-    pulseAmp:      0.4,
-    pulseFreq:     0.6,
-    distance:      14,
-    decay:         1.8,
+    position: [0, 4.5, 0] as [number, number, number],
+    color: 0xffc060,
+    baseIntensity: 1.8,
+    pulseAmp: 0.25,
+    pulseFreq: 1.1,
+    distance: 9,
+    decay: 1.6,
   },
   accentLight: {
-    position:  [0, -1, 0] as [number, number, number],
-    color:     '#c8a028',
-    intensity: 0.5,
-    distance:  10,
-    decay:     2,
-  },
+    position: [-2, 2, -3] as [number, number, number],
+    color: 0xff9030,
+    intensity: 0.6,
+    distance: 6,
+    decay: 2,
+  }
 };
